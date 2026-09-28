@@ -1,8 +1,12 @@
 const express = require("express");
 
+const { createRatingsRouter } = require("./ratings/routes");
+
 const app = express();
 
 app.use(express.json());
+
+app.use(createRatingsRouter());
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
