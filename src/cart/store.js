@@ -38,10 +38,15 @@ function createCartStore() {
       return (carts.get(userId) ?? []).map((item) => ({ ...item }));
     },
 
-    // Sums the price of every book in a user's cart.
+    // Sums the price of every book in a user's cart. Sums in integer cents
+    // first to avoid floating-point drift (e.g. 19.99 + 24.5 !== 44.49).
     async getSubtotal(userId) {
       const items = carts.get(userId) ?? [];
-      return items.reduce((sum, item) => sum + (FAKE_BOOK_PRICES[item.bookId] ?? 0), 0);
+      const totalCents = items.reduce((sum, item) => {
+        const price = FAKE_BOOK_PRICES[item.bookId] ?? 0;
+        return sum + Math.round(price * 100);
+      }, 0);
+      return totalCents / 100;
     },
   };
 }
