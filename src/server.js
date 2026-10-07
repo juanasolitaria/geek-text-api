@@ -2,9 +2,11 @@ const express = require("express");
 
 const { createRatingsRouter } = require("./ratings/routes");
 const { createBooksRouter } = require("./books/routes");
+const { createProfilesRouter } = require("./profiles/routes");
 
 const app = express();
 
+app.use("/users", createProfilesRouter());
 app.use(express.json());
 
 app.use(createRatingsRouter());

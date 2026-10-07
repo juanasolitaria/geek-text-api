@@ -23,3 +23,25 @@ model Book {
   @@index([title])
   @@index([author])
 }
+
+model User {
+  id           String       @id @default(cuid())
+  username     String       @unique
+  passwordHash String
+  name         String?
+  email        String?
+  homeAddress  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  creditCards  CreditCard[]
+}
+
+model CreditCard {
+  id        String   @id @default(cuid())
+  userId    String
+  last4     String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
