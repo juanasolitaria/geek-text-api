@@ -61,7 +61,6 @@ function createProfilesRouter(repository = createProfileRepository()) {
     res.status(201).end();
   });
 
-  router.use((req, res) => res.status(404).json({ error: 'Route not found.' }));
   router.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
     if (error instanceof HttpError) return res.status(error.status).json({ error: error.message });
