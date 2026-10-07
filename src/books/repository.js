@@ -7,7 +7,7 @@ const SORT_FIELDS = {
   price: "price",
 };
 
-// The routes only depend on listBooks, so a Prisma client can be swapped out
+// The routes only depend on the repository, so a Prisma client can be swapped out
 // for a lightweight fake in tests.
 function createBookRepository(prisma = new PrismaClient()) {
   return {
@@ -15,6 +15,10 @@ function createBookRepository(prisma = new PrismaClient()) {
       return prisma.book.findMany({
         orderBy: { [SORT_FIELDS[sortBy]]: order },
       });
+    },
+
+    async getBookById(id) {
+      return prisma.book.findUnique({ where: { id } });
     },
   };
 }
