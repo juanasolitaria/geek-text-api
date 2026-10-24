@@ -112,3 +112,41 @@ test("rejects an unsupported order direction", async () => {
     assert.equal((await response.json()).error, "order must be one of: asc, desc.");
   });
 });
+
+test("GET /books/:id returns the requested book", async () => {
+  const book = {
+    id: "1",
+    title: "Clean Code",
+    author: "Robert C. Martin",
+    price: 42.5,
+  };
+
+  const repository = {
+    async getBookById(id) {
+      return id === book.id ? book : null;
+    },
+  };
+
+  await withApi(repository, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/books/1`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), book);
+  });
+});
+
+test("GET /books/:id returns 404 for a missing book", async () => {
+  const repository = {
+    async getBookById() {
+      return null;
+    },
+  };
+
+  await withApi(repository, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/books/missing`);
+    assert.equal(response.status, 404);
+    assert.equal(
+      (await response.json()).error,
+      "Book not found."
+    );
+  });
+});

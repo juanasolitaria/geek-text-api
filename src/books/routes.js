@@ -23,6 +23,17 @@ function createBooksRouter(repository = createBookRepository()) {
     return res.json(books);
   });
 
+  // Book details: GET /books/:id returns one book, or 404 if it doesn't exist.
+  router.get("/books/:id", async (req, res) => {
+    const book = await repository.getBookById(req.params.id);
+
+    if (!book) {
+      return res.status(404).json({ error: "Book not found." });
+    }
+
+    return res.json(book);
+  });
+
   return router;
 }
 
