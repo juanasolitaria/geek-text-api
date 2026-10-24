@@ -33,6 +33,7 @@ model CartItem {
   bookId  String
   addedAt DateTime @default(now())
 
+  user User @relation(fields: [userId], references: [id])
   book Book @relation(fields: [bookId], references: [id])
 
   @@unique([userId, bookId])
@@ -40,22 +41,28 @@ model CartItem {
 }
 ```
 
-`userId` is a plain string for now — the `User` table (owned by Torin's
-Profile Management feature) hasn't been merged into `main` yet, so there's
-no foreign key for it. `bookId` has a real foreign key to the shared `Book`
-table (owned by Gianna's Book Browsing feature), so adding a book that
-doesn't exist fails at the database level.
+Both `userId` and `bookId` have real foreign keys — `userId` to the shared
+`User` table (Torin's Profile Management feature) and `bookId` to the
+shared `Book` table (Gianna's Book Browsing feature). Adding an item with
+either ID missing fails at the database level, and `repository.js`
+translates that into a `404` with a message naming which one was wrong
+("That user does not exist." vs. "That book does not exist.") by reading
+which foreign key constraint Prisma reports in the error.
+
+Note: when I ran this migration, Prisma also had to apply Torin's
+`add_profiles` migration first — it had been committed to the repo but had
+never actually been run against the shared Supabase database, so the
+`User`/`CreditCard` tables didn't exist until this migration created them.
 
 ## Design choices to confirm with the Product Owner and team
 
 - Adding a book that's already in the cart returns `409 Conflict` instead of
   increasing a quantity — there is no quantity field. Confirm with the team
   whether a user should be able to add the same book more than once.
-- Adding a `bookId` that doesn't exist in the `Book` table returns `404`.
+- Adding a `bookId` or `userId` that doesn't exist returns `404` with a
+  message naming which one was invalid.
 - The subtotal is a plain sum of item prices — no tax or shipping. A book
   with no price recorded counts as `0`.
-- Once `userId` has a real `User` table to reference, add a foreign key the
-  same way `bookId` has one now.
 
 ## How the files work
 

@@ -46,7 +46,11 @@ function createCartRouter(store = createCartRepository()) {
 
     const item = await store.addBook({ userId: userId.trim(), bookId: bookId.trim() });
 
-    if (item === false) {
+    if (item === "user-not-found") {
+      return res.status(404).json({ error: "That user does not exist." });
+    }
+
+    if (item === "book-not-found") {
       return res.status(404).json({ error: "That book does not exist." });
     }
 

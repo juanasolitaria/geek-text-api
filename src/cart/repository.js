@@ -5,14 +5,17 @@ const { PrismaClient } = require("@prisma/client");
 function createCartRepository(prisma = new PrismaClient()) {
   return {
     // Returns the created cart item, `null` if the book is already in the
-    // cart (unique constraint), or `false` if the bookId doesn't exist
-    // (foreign key constraint).
+    // cart (unique constraint), or "user-not-found"/"book-not-found" if the
+    // userId/bookId doesn't exist (foreign key constraint) — Prisma's error
+    // metadata names which constraint failed.
     async addBook({ userId, bookId }) {
       try {
         return await prisma.cartItem.create({ data: { userId, bookId } });
       } catch (err) {
         if (err.code === "P2002") return null;
-        if (err.code === "P2003") return false;
+        if (err.code === "P2003") {
+          return err.meta?.constraint?.includes("userId") ? "user-not-found" : "book-not-found";
+        }
         throw err;
       }
     },

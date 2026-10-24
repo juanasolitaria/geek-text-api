@@ -9,15 +9,19 @@ const catalog = {
   "book-2": { id: "book-2", title: "Clean Code", author: "Robert C. Martin", price: 24.5 },
 };
 
+const validUsers = new Set(["user-1", "user-2"]);
+
 // Stands in for the Prisma repository so the HTTP behavior can be tested
 // without a database connection. Mirrors the same four methods and return
-// shapes the real repository uses (null = duplicate, false = unknown book).
+// shapes the real repository uses (null = duplicate, "user-not-found" /
+// "book-not-found" = the matching foreign key doesn't exist).
 function createFakeRepository() {
   const carts = new Map(); // userId -> array of bookId
 
   return {
     async addBook({ userId, bookId }) {
-      if (!catalog[bookId]) return false;
+      if (!validUsers.has(userId)) return "user-not-found";
+      if (!catalog[bookId]) return "book-not-found";
 
       const items = carts.get(userId) ?? [];
       if (items.includes(bookId)) return null;
@@ -119,10 +123,19 @@ test("adding a book returns 201 with the created cart item", async () => {
   });
 });
 
-test("adding a book that doesn't exist returns 404", async () => {
+test("adding a book that doesn't exist returns 404 with a book-specific message", async () => {
   await withApi(async (baseUrl) => {
     const response = await addBook(baseUrl, { userId: "user-1", bookId: "does-not-exist" });
     assert.equal(response.status, 404);
+    assert.equal((await response.json()).error, "That book does not exist.");
+  });
+});
+
+test("adding to a cart for a user that doesn't exist returns 404 with a user-specific message", async () => {
+  await withApi(async (baseUrl) => {
+    const response = await addBook(baseUrl, { userId: "ghost-user", bookId: "book-1" });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error, "That user does not exist.");
   });
 });
 
