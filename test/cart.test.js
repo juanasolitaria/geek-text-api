@@ -3,13 +3,57 @@ const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const express = require("express");
 const { createCartRouter } = require("../src/cart/routes");
-const { createCartStore } = require("../src/cart/store");
 
-// Each HTTP test uses a fresh store and a real server on an available local port.
+const catalog = {
+  "book-1": { id: "book-1", title: "Dune", author: "Frank Herbert", price: 19.99 },
+  "book-2": { id: "book-2", title: "Clean Code", author: "Robert C. Martin", price: 24.5 },
+};
+
+const validUsers = new Set(["user-1", "user-2"]);
+
+// Stands in for the Prisma repository so the HTTP behavior can be tested
+// without a database connection. Mirrors the same four methods and return
+// shapes the real repository uses (null = duplicate, "user-not-found" /
+// "book-not-found" = the matching foreign key doesn't exist).
+function createFakeRepository() {
+  const carts = new Map(); // userId -> array of bookId
+
+  return {
+    async addBook({ userId, bookId }) {
+      if (!validUsers.has(userId)) return "user-not-found";
+      if (!catalog[bookId]) return "book-not-found";
+
+      const items = carts.get(userId) ?? [];
+      if (items.includes(bookId)) return null;
+
+      carts.set(userId, [...items, bookId]);
+      return { id: `${userId}-${bookId}`, userId, bookId, addedAt: new Date().toISOString() };
+    },
+
+    async removeBook({ userId, bookId }) {
+      const items = carts.get(userId) ?? [];
+      if (!items.includes(bookId)) return false;
+
+      carts.set(userId, items.filter((id) => id !== bookId));
+      return true;
+    },
+
+    async listBooks(userId) {
+      return (carts.get(userId) ?? []).map((bookId) => catalog[bookId]);
+    },
+
+    async getSubtotal(userId) {
+      const books = (carts.get(userId) ?? []).map((bookId) => catalog[bookId]);
+      const totalCents = books.reduce((sum, book) => sum + Math.round(book.price * 100), 0);
+      return totalCents / 100;
+    },
+  };
+}
+
 async function withApi(run) {
   const app = express();
   app.use(express.json());
-  app.use(createCartRouter());
+  app.use(createCartRouter(createFakeRepository()));
   app.get("/health", (req, res) => res.json({ status: "ok" }));
 
   const server = app.listen(0, "127.0.0.1");
@@ -54,18 +98,6 @@ async function getSubtotal(baseUrl, userId) {
   return response.json();
 }
 
-test("the store records the bookId and a server-generated timestamp", async () => {
-  const store = createCartStore();
-  const before = Date.now();
-  const item = await store.addBook({ userId: "user-1", bookId: "book-1" });
-  const after = Date.now();
-
-  assert.equal(item.bookId, "book-1");
-  assert.equal(new Date(item.addedAt).toISOString(), item.addedAt);
-  assert.ok(Date.parse(item.addedAt) >= before);
-  assert.ok(Date.parse(item.addedAt) <= after);
-});
-
 test("the existing health route still works with the cart router mounted", async () => {
   await withApi(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/health`);
@@ -80,7 +112,7 @@ test("listing an empty cart returns an empty array", async () => {
   });
 });
 
-test("adding a book returns 201 with the created item", async () => {
+test("adding a book returns 201 with the created cart item", async () => {
   await withApi(async (baseUrl) => {
     const response = await addBook(baseUrl, { userId: "user-1", bookId: "book-1" });
     assert.equal(response.status, 201);
@@ -91,13 +123,30 @@ test("adding a book returns 201 with the created item", async () => {
   });
 });
 
-test("a book that was added shows up when listing the cart", async () => {
+test("adding a book that doesn't exist returns 404 with a book-specific message", async () => {
+  await withApi(async (baseUrl) => {
+    const response = await addBook(baseUrl, { userId: "user-1", bookId: "does-not-exist" });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error, "That book does not exist.");
+  });
+});
+
+test("adding to a cart for a user that doesn't exist returns 404 with a user-specific message", async () => {
+  await withApi(async (baseUrl) => {
+    const response = await addBook(baseUrl, { userId: "ghost-user", bookId: "book-1" });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error, "That user does not exist.");
+  });
+});
+
+test("a book that was added shows up as a full book object when listing the cart", async () => {
   await withApi(async (baseUrl) => {
     await addBook(baseUrl, { userId: "user-1", bookId: "book-1" });
     const items = await listCart(baseUrl, "user-1");
 
     assert.equal(items.length, 1);
-    assert.equal(items[0].bookId, "book-1");
+    assert.equal(items[0].title, "Dune");
+    assert.equal(items[0].price, 19.99);
   });
 });
 
@@ -111,13 +160,11 @@ test("adding the same book twice returns 409 and does not duplicate it", async (
   });
 });
 
-test("subtotal sums the prices of every book in the cart", async () => {
+test("subtotal sums the real prices of every book in the cart", async () => {
   await withApi(async (baseUrl) => {
     await addBook(baseUrl, { userId: "user-1", bookId: "book-1" });
     await addBook(baseUrl, { userId: "user-1", bookId: "book-2" });
 
-    // book-1 (19.99) + book-2 (24.5), written as a literal to avoid the
-    // same floating-point drift this subtotal calculation guards against.
     assert.equal(await getSubtotal(baseUrl, "user-1"), 44.49);
   });
 });
