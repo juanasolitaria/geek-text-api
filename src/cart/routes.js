@@ -1,7 +1,7 @@
 const express = require("express");
-const { createCartStore } = require("./store");
+const { createCartRepository } = require("./repository");
 
-function createCartRouter(store = createCartStore()) {
+function createCartRouter(store = createCartRepository()) {
   const router = express.Router();
 
   // API Call: Retrieve the list of books in a user's shopping cart.
@@ -45,6 +45,10 @@ function createCartRouter(store = createCartStore()) {
     }
 
     const item = await store.addBook({ userId: userId.trim(), bookId: bookId.trim() });
+
+    if (item === false) {
+      return res.status(404).json({ error: "That book does not exist." });
+    }
 
     if (!item) {
       return res.status(409).json({ error: "That book is already in the cart." });

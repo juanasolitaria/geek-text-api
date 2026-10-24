@@ -1,4 +1,4 @@
-# Shopping cart: local prototype
+# Shopping cart
 
 Owner: Juan Rincon
 Project: Geek Text REST API
@@ -8,114 +8,143 @@ Scope: viewing a cart, adding a book, removing a book, and calculating the subto
 
 | Method and path | Input | Successful response |
 | --- | --- | --- |
-| `GET /cart/:userId` | User ID in the URL | `200 OK`, a JSON list of cart items |
+| `GET /cart/:userId` | User ID in the URL | `200 OK`, a JSON list of full Book objects currently in the cart |
 | `GET /cart/:userId/subtotal` | User ID in the URL | `200 OK`, a JSON number (`0` for an empty cart) |
-| `POST /cart` | JSON body with `userId` and `bookId` | `201 Created`, the created item |
+| `POST /cart` | JSON body with `userId` and `bookId` | `201 Created`, the created cart item (`id`, `userId`, `bookId`, `addedAt`) |
 | `DELETE /cart` | JSON body with `userId` and `bookId` | `204 No Content` |
 
 Example request body for POST and DELETE:
 
 ```json
-{"userId":"user-1","bookId":"book-1"}
+{"userId":"user-1","bookId":"cmuufywf50000uebc72pz7mof"}
 ```
 
-Each cart item has a `bookId` and a server-generated `addedAt` timestamp.
+`bookId` must be the real `id` of a row in the `Book` table (a Prisma `cuid`).
 
-## Prototype choices to confirm with the Product Owner and team
+## Database
 
-These choices support local development; they are not additional assignment
-requirements or finalized team policies:
+Connected to the team's shared Supabase Postgres database via Prisma. The
+`CartItem` table:
 
-- Book prices come from a temporary hardcoded list (`FAKE_BOOK_PRICES`) in
-  `store.js`, not from the real `Book` table, since Shopping Cart isn't
-  connected to Supabase yet. Three sample IDs (`book-1`, `book-2`, `book-3`)
-  have realistic prices; any other book ID is treated as free.
+```prisma
+model CartItem {
+  id      String   @id @default(cuid())
+  userId  String
+  bookId  String
+  addedAt DateTime @default(now())
+
+  book Book @relation(fields: [bookId], references: [id])
+
+  @@unique([userId, bookId])
+  @@index([userId])
+}
+```
+
+`userId` is a plain string for now — the `User` table (owned by Torin's
+Profile Management feature) hasn't been merged into `main` yet, so there's
+no foreign key for it. `bookId` has a real foreign key to the shared `Book`
+table (owned by Gianna's Book Browsing feature), so adding a book that
+doesn't exist fails at the database level.
+
+## Design choices to confirm with the Product Owner and team
+
 - Adding a book that's already in the cart returns `409 Conflict` instead of
   increasing a quantity — there is no quantity field. Confirm with the team
   whether a user should be able to add the same book more than once.
-- IDs are non-empty strings, such as `user-1` and `book-1`. Adopt the real
-  `User` and `Book` ID types (Gianna's `Book` model uses `cuid()`) once this
-  connects to Prisma.
-- The subtotal is a plain sum of item prices — no tax or shipping.
-- Proposed success responses: `201` with the created item for POST, `204`
-  with no body for DELETE.
+- Adding a `bookId` that doesn't exist in the `Book` table returns `404`.
+- The subtotal is a plain sum of item prices — no tax or shipping. A book
+  with no price recorded counts as `0`.
+- Once `userId` has a real `User` table to reference, add a foreign key the
+  same way `bookId` has one now.
 
 ## How the files work
 
 | File | Responsibility |
 | --- | --- |
 | `src/cart/routes.js` | Receive requests, validate input, choose status codes and responses |
-| `src/cart/store.js` | Temporarily store cart items in memory and calculate subtotals |
-| `test/cart.test.js` | Exercise the store and real HTTP requests with Node's test runner |
+| `src/cart/repository.js` | Talk to Supabase through Prisma: create, delete, and query `CartItem` rows |
+| `test/cart.test.js` | Exercise the HTTP routes with Node's test runner, using a fake repository |
 
-`createCartRouter` accepts a store with four async methods: `addBook`,
-`removeBook`, `listBooks`, and `getSubtotal`. A future Prisma-backed
-repository can provide the same four methods, so the HTTP routes won't need
-to change — the same approach Gianna used for `books/repository.js`.
+`createCartRouter` accepts a repository with four async methods: `addBook`,
+`removeBook`, `listBooks`, and `getSubtotal` — the same shape Gianna used
+for `books/repository.js`. The real `repository.js` translates Prisma
+errors into plain return values the routes already understand: `null` means
+the book is already in the cart (unique constraint), `false` means the
+`bookId` doesn't exist (foreign key constraint).
 
-The existing `app.use(express.json())` in `server.js` must run before the
-cart router, so Express can parse the JSON body on POST and DELETE.
+The test suite never touches the real database — it injects a small fake
+repository with an in-memory catalog of two sample books, so the tests run
+anywhere without Supabase credentials.
 
 ## Current limits and remaining work
 
-- Storage is a `Map` in the server process. Restarting the server clears
-  every user's cart.
-- Book prices are a temporary hardcoded list, not the real `Book` table —
-  the subtotal is only realistic for the three sample book IDs.
-- There is no check that a `userId` or `bookId` actually exists; any
-  non-empty string is accepted.
-- Supabase/Prisma integration remains to be added once I have the
-  connection credentials from the team's shared Supabase project.
+- `userId` has no foreign key yet, since the `User` table doesn't exist in
+  `main` yet. Any non-empty string is accepted as a user ID.
+- No quantity field — adding a book already in the cart is rejected rather
+  than incrementing a count.
+- No authentication — any caller can read or modify any user's cart.
 
 ## Acceptance checks for this increment
 
 1. GET an empty cart for a new user; confirm it returns `[]`.
-2. POST a book; confirm it returns `201` with the created item.
-3. GET that user's cart; confirm the book appears.
-4. POST the same book again; confirm it returns `409` and the cart still
-   has only one item.
-5. GET the subtotal; confirm it matches the sum of the sample prices (for
-   example, `book-1` + `book-2` = `44.49`).
-6. DELETE the book; confirm it returns `204`, and the cart is empty again.
-7. DELETE a book that isn't in the cart; confirm it returns `404`.
-8. Confirm `/health` still responds with the cart router mounted.
+2. POST a real `bookId`; confirm it returns `201` with the created cart item.
+3. GET that user's cart; confirm the full book (title, price, etc.) appears.
+4. POST the same book again; confirm it returns `409` and the cart still has
+   only one item.
+5. POST a `bookId` that doesn't exist; confirm it returns `404`.
+6. GET the subtotal; confirm it matches the sum of the real book prices.
+7. DELETE the book; confirm it returns `204`, and the cart is empty again.
+8. DELETE a book that isn't in the cart; confirm it returns `404`.
+9. Confirm `/health` still responds with the cart router mounted.
 
-Run `node --test test/cart.test.js` from the project root, or `npm test` to
-run the whole project's suite (28 tests across ratings, books, and cart as
-of this increment). I also tested every endpoint by hand in Postman against
-a running `src/server.js` before writing the automated tests, to confirm
-the real behavior matched what the tests check.
+Run `npm test` to run the whole project's suite (28 tests across ratings,
+books, and cart). I also tested all 9 scenarios above by hand against the
+live Supabase database (via `curl` and earlier via Postman) before and after
+writing this doc, to confirm the real behavior matches what the fake-backed
+tests check.
 
 ## Reporting and AI assistance
 
 I used Claude through this entire story, from getting my environment and
-GitHub branch set up to writing the final code. I'm new to Node.js,
-Express, Git, and Prisma, so I leaned on it heavily to understand concepts
-I didn't know yet — what a Pull Request actually is, the difference between
-a fork and a branch (which came up when a teammate's PR needed to be moved
-from her fork into a branch on our shared repo), why `git checkout` was
-failing because of untracked files, and how Express route parameters like
-`:userId` work.
+GitHub branch set up to connecting to our shared Supabase database. I'm new
+to Node.js, Express, Git, and Prisma, so I leaned on it heavily to
+understand concepts I didn't know yet — what a Pull Request actually is,
+the difference between a fork and a branch, why `git checkout` was failing
+because of untracked files, how Express route parameters like `:userId`
+work, and how Prisma foreign keys turn into specific error codes
+(`P2002` for a duplicate, `P2003` for a missing related row) that the code
+has to translate into HTTP status codes.
 
-For the implementation, I asked Claude to follow the same pattern my
-teammates had already established in the codebase (an in-memory store for
-now, with the same shape a future Prisma repository will have) instead of
-the database-first approach we originally sketched out, so my feature would
-be consistent with the rest of the team's code. Claude wrote the first
-version of `store.js`, `routes.js`, and `test/cart.test.js`, and caught a
-real bug while testing: the subtotal endpoint was returning floating-point
-artifacts like `44.489999999999995` instead of `44.49`, which it fixed by
-summing prices in integer cents instead of decimals.
+For the first increment (Sprint 2), I asked Claude to follow the same
+pattern my teammates had already established in the codebase — an
+in-memory store for now, with the same method shape a future Prisma
+repository would have — so my feature would be consistent with the rest of
+the team's code before the shared database was ready. It also caught a real
+bug while testing: the subtotal endpoint was returning floating-point
+artifacts like `44.489999999999995` instead of `44.49`, fixed by summing
+prices in integer cents instead of decimals.
 
-I tested every endpoint myself by hand in Postman before any automated test
-existed, and I ran the full test suite myself to confirm all 28 tests pass.
-I reviewed the code with Claude explaining each piece until I understood
-how the pieces fit together (route parameters, the store's dependency
-injection pattern, why the test suite spins up a real server on a random
-port).
+For this increment (Sprint 3), once I had real Supabase credentials, Claude
+helped me add the `CartItem` model to the shared `prisma/schema.prisma`,
+run the migration, and replace the in-memory store with a Prisma-backed
+`repository.js`, following the exact pattern Gianna used for the Book
+Browsing feature. It also rewrote the test suite to use a fake repository
+instead of the real database, matching the approach in `books.test.js`, and
+helped me diagnose two real setup problems along the way: a leftover
+`[YOUR-PASSWORD]` placeholder in my `.env` that was never replaced, and a
+Supabase Personal Access Token mixed in with the database password that
+should never go into a database connection string.
+
+I ran every test myself (`npm test`, 28/28 passing) and tested all 9
+scenarios by hand against the live database before considering this done. I
+reviewed the code with Claude explaining each piece — the repository
+pattern, how Prisma error codes map to HTTP responses, and why the test
+suite uses a fake repository instead of a real database connection — until
+I understood how the pieces fit together.
 
 ## References
 
 - Express routing: https://expressjs.com/en/guide/routing/
 - Express API: https://expressjs.com/en/5x/api/
 - Node.js test runner: https://nodejs.org/docs/latest-v24.x/api/test.html
+- Prisma error reference: https://www.prisma.io/docs/orm/reference/error-reference

@@ -20,6 +20,21 @@ model Book {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  cartItems CartItem[]
+
   @@index([title])
   @@index([author])
+}
+
+// Feature 3 — Shopping Cart (owned by Juan)
+model CartItem {
+  id      String   @id @default(cuid())
+  userId  String
+  bookId  String
+  addedAt DateTime @default(now())
+
+  book Book @relation(fields: [bookId], references: [id])
+
+  @@unique([userId, bookId])
+  @@index([userId])
 }
