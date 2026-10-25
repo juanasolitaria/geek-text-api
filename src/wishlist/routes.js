@@ -1,7 +1,7 @@
 const express = require("express");
-const { createWishlistStore } = require("./store");
+const { createWishlistRepository } = require("./repository");
 
-function createWishlistRouter(store = createWishlistStore()) {
+function createWishlistRouter(store = createWishlistRepository()) {
   const router = express.Router();
 
 // API Call: Retrieve users wishlist
@@ -35,6 +35,15 @@ function createWishlistRouter(store = createWishlistStore()) {
     }
 
     const item = await store.addBook({ userId, bookId: bookId.trim() });
+
+// Constraint: user and book must exist in the database
+    if (item === "user-not-found") {
+      return res.status(404).json({ error: "That user does not exist." });
+    }
+
+    if (item === "book-not-found") {
+      return res.status(404).json({ error: "That book does not exist." });
+    }
 
 // Contraint: Book can only be in a wishlist once
     if (!item) {
