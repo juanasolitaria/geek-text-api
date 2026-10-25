@@ -62,3 +62,17 @@ model CartItem {
   @@unique([userId, bookId])
   @@index([userId])
 }
+
+// Feature Wishlist Management (owned by Brandon Robinson)
+model WishlistItem {
+  id      String   @id @default(cuid())
+  userId  String
+  bookId  String
+  addedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@index([userId])
+}
