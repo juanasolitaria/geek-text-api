@@ -1,9 +1,9 @@
 const { randomUUID } = require("node:crypto");
 
-// Prototype storage: each server process starts with an empty array.
-// Later, replace these two methods with Prisma database operations.
+// Isolated in-memory test double. Production defaults to repository.js.
 function createRatingStore() {
   const ratings = [];
+  const comments = [];
 
   return {
     async addRating({ bookId, userId, rating }) {
@@ -27,6 +27,16 @@ function createRatingStore() {
 
       const total = bookRatings.reduce((sum, record) => sum + record.rating, 0);
       return total / bookRatings.length;
+    },
+
+    async addComment({ bookId, userId, comment }) {
+      const record = { id: randomUUID(), bookId, userId, comment, createdAt: new Date().toISOString() };
+      comments.push(record);
+      return { ...record };
+    },
+
+    async getComments(bookId) {
+      return comments.filter((record) => record.bookId === bookId).map((record) => ({ ...record }));
     },
   };
 }

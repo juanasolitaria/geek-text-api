@@ -21,9 +21,12 @@ model Book {
   updatedAt   DateTime @updatedAt
 
   cartItems CartItem[]
+  wishlistItems WishlistItem[]
 
   @@index([title])
   @@index([author])
+  ratings Rating[]
+  comments Comment[]
 }
 
 model User {
@@ -37,6 +40,9 @@ model User {
   updatedAt    DateTime     @updatedAt
   creditCards  CreditCard[]
   cartItems    CartItem[]
+  wishlistItems WishlistItem[]
+  ratings Rating[]
+  comments Comment[]
 }
 
 model CreditCard {
@@ -74,5 +80,33 @@ model WishlistItem {
   book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
 
   @@unique([userId, bookId])
+  @@index([userId])
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  bookId    String
+  userId    String
+  rating    Int
+  createdAt DateTime @default(now())
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([bookId])
+  @@index([userId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  bookId    String
+  userId    String
+  comment   String
+  createdAt DateTime @default(now())
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([bookId, createdAt])
   @@index([userId])
 }

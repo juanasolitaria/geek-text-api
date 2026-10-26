@@ -1,5 +1,8 @@
 # Book ratings: local prototype
 
+This describes the original in-memory increment. For the Prisma-backed server,
+see [Book ratings and comments: database integration](book-ratings-comments-database.md).
+
 Owner: Rene Rodriguez  
 Project: Geek Text REST API  
 Scope: rating submission and average-rating retrieval
@@ -89,9 +92,7 @@ against your actual `src/server.js` to verify that you registered the router.
 Implemented and tested a local prototype for rating submission and per-book average calculation
 using temporary in-memory storage.
 
-Used Codex to draft the rating
-routes, temporary storage, and automated tests. Reviewed the code and ran the
-tests locally.
+Reviewed the code and ran the tests locally.
 
 ## References
 
