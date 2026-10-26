@@ -9,7 +9,7 @@ const { createRatingStore } = require("../src/ratings/store");
 async function withApi(run) {
   const app = express();
   app.use(express.json());
-  app.use(createRatingsRouter());
+  app.use(createRatingsRouter(createRatingStore()));
   app.get("/health", (req, res) => res.json({ status: "ok" }));
 
   const server = app.listen(0, "127.0.0.1");
