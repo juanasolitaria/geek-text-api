@@ -1,34 +1,17 @@
 const express = require('express');
+const { createBasicAuth } = require('../auth/basic');
 const { createProfileRepository } = require('./repository');
-const { hashPassword, verifyPassword } = require('./passwords');
+const { hashPassword } = require('./passwords');
 const { HttpError, profileInput, cardLast4, username } = require('./validation');
 
 function createProfilesRouter(repository = createProfileRepository()) {
   const router = express.Router();
+  const authenticate = createBasicAuth(repository, 'Profile Management');
   router.use((req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     next();
   });
   router.use(express.json({ limit: '16kb', strict: true }));
-
-  async function authenticate(req, res, next) {
-    const authorization = req.get('authorization') || '';
-    const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(authorization);
-    const unauthorized = () => {
-      res.set('WWW-Authenticate', 'Basic realm="Profile Management", charset="UTF-8"');
-      throw new HttpError(401, 'Valid account credentials are required.');
-    };
-    if (!match || match[1].length > 1024) return unauthorized();
-    const decoded = Buffer.from(match[1], 'base64').toString('utf8');
-    const colon = decoded.indexOf(':');
-    if (colon < 0) return unauthorized();
-    const login = decoded.slice(0, colon).trim().toLowerCase();
-    const secret = decoded.slice(colon + 1);
-    const account = await repository.findCredentials(login);
-    if (!account || !(await verifyPassword(secret, account.passwordHash))) return unauthorized();
-    req.account = { id: account.id, username: account.username };
-    next();
-  }
 
   async function ownProfile(req, res, next) {
     const target = username(req.params.username);

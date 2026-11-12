@@ -4,12 +4,13 @@ const { once } = require("node:events");
 const express = require("express");
 const { createRatingsRouter } = require("../src/ratings/routes");
 const { createRatingStore } = require("../src/ratings/store");
+const { createTestAccounts, basicHeader } = require("../test-support/feedback-accounts");
 
 // Each HTTP test uses a fresh store and a real server on an available local port.
 async function withApi(run) {
   const app = express();
   app.use(express.json());
-  app.use(createRatingsRouter(createRatingStore()));
+  app.use(createRatingsRouter(createRatingStore(), createTestAccounts()));
   app.get("/health", (req, res) => res.json({ status: "ok" }));
 
   const server = app.listen(0, "127.0.0.1");
@@ -26,10 +27,10 @@ async function withApi(run) {
   }
 }
 
-async function submit(baseUrl, bookId, body) {
+async function submit(baseUrl, bookId, body, userId = "user-1") {
   return fetch(`${baseUrl}/books/${encodeURIComponent(bookId)}/ratings`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: basicHeader(userId) },
     body: JSON.stringify(body),
   });
 }
@@ -81,7 +82,7 @@ test("ratings of 5 and 3 average to 4, independently of other books", async () =
       ["book-1", "user-2", 3],
       ["book-2", "user-1", 1],
     ]) {
-      const response = await submit(baseUrl, bookId, { userId, rating });
+      const response = await submit(baseUrl, bookId, { userId, rating }, userId);
       assert.equal(response.status, 201);
       await response.text();
     }
@@ -93,7 +94,7 @@ test("ratings of 5 and 3 average to 4, independently of other books", async () =
 test("preserves a fractional average instead of rounding to whole stars", async () => {
   await withApi(async (baseUrl) => {
     for (const [userId, rating] of [["user-1", 5], ["user-2", 4]]) {
-      const response = await submit(baseUrl, "book-1", { userId, rating });
+      const response = await submit(baseUrl, "book-1", { userId, rating }, userId);
       assert.equal(response.status, 201);
       await response.text();
     }
@@ -128,7 +129,9 @@ test("rejects missing or malformed required information", async () => {
       assert.equal(response.status, 400);
       assert.equal(typeof (await response.json()).error, "string");
     }
-    const emptyRequest = await fetch(`${baseUrl}/books/book-1/ratings`, { method: "POST" });
+    const emptyRequest = await fetch(`${baseUrl}/books/book-1/ratings`, {
+      method: "POST", headers: { Authorization: basicHeader() },
+    });
     assert.equal(emptyRequest.status, 400);
     assert.equal(typeof (await emptyRequest.json()).error, "string");
     assert.equal(await average(baseUrl, "book-1"), null);
