@@ -4,14 +4,16 @@ const { createRatingsRouter } = require("./ratings/routes");
 const { createWishlistRouter } = require("./wishlist/routes");
 const { createBooksRouter } = require("./books/routes");
 const { createProfilesRouter } = require("./profiles/routes");
+const { createProfileRepository } = require("./profiles/repository");
 const { createCartRouter } = require("./cart/routes");
 
 const app = express();
+const accounts = createProfileRepository();
 
-app.use("/users", createProfilesRouter());
+app.use("/users", createProfilesRouter(accounts));
 app.use(express.json());
 
-app.use(createRatingsRouter());
+app.use(createRatingsRouter(undefined, accounts));
 app.use(createWishlistRouter());
 app.use(createBooksRouter());
 app.use(createCartRouter());

@@ -5,6 +5,7 @@ const { once } = require("node:events");
 const express = require("express");
 const { createRatingsRouter } = require("../src/ratings/routes");
 const { createRatingsRepository } = require("../src/ratings/repository");
+const { createTestAccounts, basicHeader } = require("../test-support/feedback-accounts");
 
 // An isolated Prisma substitute: HTTP and repository code run together,
 // while automated tests never connect to the team's shared Supabase database.
@@ -41,10 +42,10 @@ function fakePrisma() {
   };
 }
 
-async function withApi(prisma, run) {
+async function withApi(prisma, run, accounts = createTestAccounts()) {
   const app = express();
   app.use(express.json());
-  app.use(createRatingsRouter(createRatingsRepository(prisma)));
+  app.use(createRatingsRouter(createRatingsRepository(prisma), accounts));
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   try {
@@ -57,9 +58,58 @@ async function withApi(prisma, run) {
   }
 }
 
-function post(url, body) {
-  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+function post(url, body, { userId, authorization = basicHeader(userId) } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (authorization) headers.Authorization = authorization;
+  return fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
 }
+
+test("both feedback POST routes require valid profile credentials", async () => {
+  const prisma = fakePrisma();
+  await withApi(prisma, async (baseUrl) => {
+    for (const [path, body] of [
+      ["ratings", { userId: "user-1", rating: 5 }],
+      ["comments", { userId: "user-1", comment: "Useful book." }],
+    ]) {
+      for (const authorization of [null, "Basic invalid!", basicHeader("user-1", "wrong-password")]) {
+        const response = await post(baseUrl + "/books/book-1/" + path, body, { authorization });
+        assert.equal(response.status, 401);
+        assert.equal(response.headers.get("www-authenticate"), 'Basic realm="Book Ratings and Comments", charset="UTF-8"');
+        assert.deepEqual(await response.json(), { error: "Valid account credentials are required." });
+      }
+    }
+    assert.deepEqual(prisma.ratings, []);
+    assert.deepEqual(prisma.comments, []);
+  });
+});
+
+test("an authenticated reader cannot submit feedback for another account", async () => {
+  const prisma = fakePrisma();
+  await withApi(prisma, async (baseUrl) => {
+    for (const [path, body] of [
+      ["ratings", { userId: "user-2", rating: 5 }],
+      ["comments", { userId: "user-2", comment: "Useful book." }],
+    ]) {
+      const response = await post(baseUrl + "/books/book-1/" + path, body);
+      assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), { error: "userId must match the authenticated account." });
+    }
+    assert.deepEqual(prisma.ratings, []);
+    assert.deepEqual(prisma.comments, []);
+  });
+});
+
+test("credential lookup failures return a generic 500 without writing feedback", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const prisma = fakePrisma();
+  const accounts = { findCredentials: async () => { throw new Error("private account database details"); } };
+  await withApi(prisma, async (baseUrl) => {
+    const response = await post(baseUrl + "/books/book-1/ratings", { userId: "user-1", rating: 5 });
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: "Unable to complete the ratings or comments request." });
+    assert.deepEqual(prisma.ratings, []);
+  }, accounts);
+});
 
 test("comments are created with 201, an empty body, and a server timestamp", async () => {
   const prisma = fakePrisma();
@@ -115,7 +165,9 @@ test("invalid comments and user IDs return 400 without creating records", async 
       assert.equal(response.status, 400);
       assert.equal(typeof (await response.json()).error, "string");
     }
-    const empty = await fetch(`${baseUrl}/books/book-1/comments`, { method: "POST" });
+    const empty = await fetch(`${baseUrl}/books/book-1/comments`, {
+      method: "POST", headers: { Authorization: basicHeader() },
+    });
     assert.equal(empty.status, 400);
     await empty.text();
     assert.equal(prisma.comments.length, 0);
@@ -170,11 +222,12 @@ test("all four endpoints reject a nonexistent book with 404", async () => {
   });
 });
 
-test("rating and comment submissions require an existing user", async () => {
+test("a feedback author deleted after authentication returns 404", async () => {
   const prisma = fakePrisma();
+  prisma.user.findUnique = async () => null;
   await withApi(prisma, async (baseUrl) => {
     for (const [suffix, data] of [["ratings", { rating: 5 }], ["comments", { comment: "Text" }]]) {
-      const response = await post(`${baseUrl}/books/book-1/${suffix}`, { userId: "missing-user", ...data });
+      const response = await post(`${baseUrl}/books/book-1/${suffix}`, { userId: "user-1", ...data });
       assert.equal(response.status, 404);
       assert.equal((await response.json()).error, "User not found.");
     }
@@ -186,7 +239,7 @@ test("rating and comment submissions require an existing user", async () => {
 test("the database repository preserves fractional per-book averages and repeated submissions", async () => {
   await withApi(fakePrisma(), async (baseUrl) => {
     for (const [bookId, userId, rating] of [["book-1", "user-1", 5], ["book-1", "user-1", 4], ["book-2", "user-2", 1]]) {
-      const response = await post(`${baseUrl}/books/${bookId}/ratings`, { userId, rating });
+      const response = await post(`${baseUrl}/books/${bookId}/ratings`, { userId, rating }, { userId });
       assert.equal(response.status, 201);
       assert.equal(await response.text(), "");
     }
