@@ -13,6 +13,8 @@ model Book {
   title       String
   author      String
   genre       String?
+  publisher   String?
+  copiesSold  Int      @default(0)
   isbn        String?  @unique
   price       Decimal? @db.Decimal(10, 2)
   description String?
