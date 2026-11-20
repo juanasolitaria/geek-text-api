@@ -28,9 +28,10 @@ function createFakeRepository(books = catalog) {
   };
 }
 
-async function withApi(repository, run) {
+async function withApi(repository, run, options = { discountToken: "" }) {
   const app = express();
-  app.use(createBooksRouter(repository));
+  app.use(express.json());
+  app.use(createBooksRouter(repository, options));
 
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -111,6 +112,129 @@ test("rejects an unsupported order direction", async () => {
     assert.equal(response.status, 400);
     assert.equal((await response.json()).error, "order must be one of: asc, desc.");
   });
+});
+
+test("lists books for the requested genre without treating the path as a book ID", async () => {
+  const repository = {
+    async listBooksByGenre(genre) {
+      assert.equal(genre, "Science Fiction");
+      return [catalog[0]];
+    },
+  };
+
+  await withApi(repository, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/books/by-genre?genre=%20Science%20Fiction%20`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), [catalog[0]]);
+  });
+});
+
+test("rejects missing, blank, repeated, or invalid genre values", async () => {
+  await withApi({}, async (baseUrl) => {
+    for (const query of ["", "?genre=%20", "?genre=a&genre=b", "?genre=%00"]) {
+      const response = await fetch(`${baseUrl}/books/by-genre${query}`);
+      assert.equal(response.status, 400);
+    }
+  });
+});
+
+test("lists the ranked sellers from the repository", async () => {
+  const sellers = [
+    { ...catalog[0], copiesSold: 25 },
+    { ...catalog[2], copiesSold: 10 },
+  ];
+  const repository = { async listTopSellers() { return sellers; } };
+
+  await withApi(repository, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/books/top-sellers`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), sellers);
+  });
+});
+
+test("passes a fractional minimum rating to the repository", async () => {
+  const rated = { ...catalog[1], averageRating: 4.5 };
+  const repository = {
+    async listBooksByMinRating(minRating) {
+      assert.equal(minRating, 4.5);
+      return [rated];
+    },
+  };
+
+  await withApi(repository, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/books/by-rating?minRating=4.5`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), [rated]);
+  });
+});
+
+test("rejects missing, out-of-range, repeated, or nonnumeric minimum ratings", async () => {
+  await withApi({}, async (baseUrl) => {
+    for (const query of ["", "?minRating=0", "?minRating=5.01", "?minRating=a", "?minRating=4&minRating=5"]) {
+      const response = await fetch(`${baseUrl}/books/by-rating${query}`);
+      assert.equal(response.status, 400);
+    }
+  });
+});
+
+function sendDiscount(baseUrl, body, token) {
+  return fetch(`${baseUrl}/books/discounts/by-publisher`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+test("disables publisher discounts when a token has not been configured", async () => {
+  await withApi({}, async (baseUrl) => {
+    const response = await sendDiscount(baseUrl, { publisher: "Demo Press", percentage: 10 }, "test-token");
+    assert.equal(response.status, 503);
+  });
+});
+
+test("requires the configured bearer token for publisher discounts", async () => {
+  await withApi({}, async (baseUrl) => {
+    const body = { publisher: "Demo Press", percentage: 10 };
+    for (const token of [undefined, "wrong-auth", "wrong"]) {
+      const response = await sendDiscount(baseUrl, body, token);
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("www-authenticate"), "Bearer");
+    }
+  }, { discountToken: "test-token" });
+});
+
+test("rejects discounts with an invalid publisher or percentage", async () => {
+  await withApi({}, async (baseUrl) => {
+    for (const body of [
+      { publisher: "", percentage: 10 },
+      { publisher: "Demo Press", percentage: "10" },
+      { publisher: "Demo Press", percentage: -1 },
+      { publisher: "Demo Press", percentage: 101 },
+      { publisher: "Demo Press", percentage: 0 },
+    ]) {
+      const response = await sendDiscount(baseUrl, body, "test-token");
+      assert.equal(response.status, 400);
+    }
+  }, { discountToken: "test-token" });
+});
+
+test("applies a valid publisher discount and returns the number of affected books", async () => {
+  const repository = {
+    async discountBooksByPublisher(publisher, percentage) {
+      assert.equal(publisher, "Demo Press");
+      assert.equal(percentage, 12.5);
+      return 2;
+    },
+  };
+
+  await withApi(repository, async (baseUrl) => {
+    const response = await sendDiscount(baseUrl, { publisher: " Demo Press ", percentage: 12.5 }, "test-token");
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { updatedCount: 2 });
+  }, { discountToken: "test-token" });
 });
 
 test("GET /books/:id returns the requested book", async () => {
